@@ -80,5 +80,8 @@ func DeleteIPBanUserBansByBanIds(banIds []int) error {
 
 // EnsureIPBanUserBanUniqueIndex 为 (ban_id, user_id) 建立唯一索引；AutoMigrate 后调用
 func EnsureIPBanUserBanUniqueIndex(db *gorm.DB) error {
-	return db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_ip_ban_user_bans_unique ON ip_ban_user_bans (ban_id, user_id)`).Error
+	if db.Migrator().HasIndex(&IPBanUserBan{}, "idx_ip_ban_user_bans_unique") {
+		return nil
+	}
+	return db.Exec(`CREATE UNIQUE INDEX idx_ip_ban_user_bans_unique ON ip_ban_user_bans (ban_id, user_id)`).Error
 }
