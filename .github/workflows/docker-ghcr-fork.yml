@@ -41,7 +41,7 @@ jobs:
           repo="${GITHUB_REPOSITORY,,}"
           image="ghcr.io/${repo}"
           version="custom-$(date +'%Y%m%d')-${GITHUB_SHA::7}"
-          requested_platforms="${REQUESTED_PLATFORMS:-linux/amd64,linux/arm64}"
+          requested_platforms="${REQUESTED_PLATFORMS:-linux/amd64}"
           requested_platforms="${requested_platforms//[[:space:]]/}"
 
           has_amd64=false

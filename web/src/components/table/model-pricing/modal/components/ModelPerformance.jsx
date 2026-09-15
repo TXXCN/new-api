@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Avatar, Typography, Table, Empty } from '@douyinfe/semi-ui';
-import { IconActivity, IconClock, IconCheckCircle } from '@douyinfe/semi-icons';
+import { IconActivity, IconClock, IconCheckCircleStroked } from '@douyinfe/semi-icons';
 
 const { Text } = Typography;
 
@@ -111,7 +111,7 @@ const ModelPerformance = ({ modelData, t }) => {
 
           <div className='p-3 rounded-lg border' style={{ borderColor: 'var(--semi-color-border)' }}>
             <div className='text-xs text-gray-500 mb-1 flex items-center gap-1'>
-              <IconCheckCircle size={14} />
+              <IconCheckCircleStroked size={14} />
               {t('成功率')}
             </div>
             <div className='text-2xl font-semibold'>{overall.successRate}</div>
