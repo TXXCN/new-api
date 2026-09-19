@@ -1,0 +1,113 @@
+name: CI Debug (capture frontend build)
+
+on:
+  push:
+    branches:
+      - ci-debug
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    name: Capture frontend build output
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.11
+
+      - name: Install dependencies (same as the Dockerfile)
+        run: |
+          set +e
+          cd web
+          {
+            echo "bun: $(bun --version)"
+            echo "--- bun install ---"
+          } > /tmp/install.txt 2>&1
+          bun install >> /tmp/install.txt 2>&1
+          echo "install_rc=$?" >> /tmp/install.txt
+          tail -25 /tmp/install.txt
+
+      - name: Audit antd imports in the freshly resolved tree
+        run: |
+          set +e
+          cd web
+          {
+            echo "=== resolved versions (as CI resolved them) ==="
+            for p in @lobehub/ui @lobehub/icons antd-style @lobehub/fluent-emoji antd vite; do
+              if [ -f "node_modules/$p/package.json" ]; then
+                printf '%s = ' "$p"
+                node -p "require('./node_modules/$p/package.json').version"
+              else
+                echo "$p = (absent)"
+              fi
+            done
+            echo
+            echo "=== union of names imported from antd ==="
+            grep -rhoE "\{[^}]*\}[[:space:]]*from[[:space:]]*['\"]antd['\"]" node_modules --include=*.js --include=*.mjs 2>/dev/null \
+              | sed -E 's/^\{//; s/\}.*//' \
+              | tr ',' '\n' \
+              | sed -E 's/ as .*//; s/type //; s/[[:space:]]//g' \
+              | grep -v '^$' | sort -u
+            echo
+            echo "=== files importing antd ==="
+            grep -rlE "from ['\"]antd['\"]" node_modules --include=*.js --include=*.mjs --include=*.cjs 2>/dev/null | grep -v '/.bun-cache/' | head -80
+            echo
+            echo "=== raw import lines ==="
+            grep -rhE "from ['\"]antd['\"]" node_modules --include=*.js --include=*.mjs 2>/dev/null | sed 's/^[[:space:]]*//' | sort -u | head -120
+          } > /tmp/audit.txt 2>&1
+          head -60 /tmp/audit.txt
+
+      - name: Run the frontend build with full output
+        run: |
+          set +e
+          cd web
+          DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=ci-debug bun run build > /tmp/build.txt 2>&1
+          echo "build_rc=$?" | tee /tmp/build.rc
+          tail -30 /tmp/build.txt
+
+      - name: Assemble report
+        run: |
+          {
+            echo "# CI debug report"
+            echo
+            echo "commit: ${GITHUB_SHA}"
+            echo "date: $(date -u +%FT%TZ)"
+            echo
+            echo "## bun install"
+            echo '```'
+            cat /tmp/install.txt 2>/dev/null
+            echo '```'
+            echo
+            echo "## antd audit"
+            echo '```'
+            cat /tmp/audit.txt 2>/dev/null
+            echo '```'
+            echo
+            echo "## frontend build"
+            echo '```'
+            tail -300 /tmp/build.txt 2>/dev/null
+            echo '```'
+          } > /tmp/report.md
+          echo "report bytes: $(wc -c < /tmp/report.md)"
+
+      - name: Publish report to branch ci-debug-reports
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/pub && cd /tmp/pub
+          git init -q
+          git config user.name "ci-debug-bot"
+          git config user.email "ci-debug-bot@users.noreply.github.com"
+          cp /tmp/report.md ci-debug-report.md
+          git add ci-debug-report.md
+          git commit -qm "ci debug report ${GITHUB_SHA}"
+          git push -q --force "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-debug-reports
+          echo published
