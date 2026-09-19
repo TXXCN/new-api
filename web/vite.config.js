@@ -66,14 +66,25 @@ export default defineConfig({
     },
   },
   build: {
-    minify: false,
-    sourcemap: false,
-    cssCodeSplit: false,
-    reportCompressedSize: false,
-    chunkSizeWarningLimit: 2048,
     rollupOptions: {
       output: {
-        manualChunks: undefined,
+        manualChunks: {
+          'react-core': ['react', 'react-dom', 'react-router-dom'],
+          'semi-ui': ['@douyinfe/semi-icons', '@douyinfe/semi-ui'],
+          tools: ['axios', 'history', 'marked'],
+          'react-components': [
+            'react-dropzone',
+            'react-fireworks',
+            'react-telegram-login',
+            'react-toastify',
+            'react-turnstile',
+          ],
+          i18n: [
+            'i18next',
+            'react-i18next',
+            'i18next-browser-languagedetector',
+          ],
+        },
       },
     },
   },
