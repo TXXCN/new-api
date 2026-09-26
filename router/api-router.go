@@ -33,6 +33,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/home_page_content", controller.GetHomePageContent)
 		apiRouter.GET("/pricing", middleware.TryUserAuth(), controller.GetPricing)
 		apiRouter.GET("/model/performance", middleware.TryUserAuth(), controller.GetModelPerformance)
+		apiRouter.GET("/perf-metrics", middleware.TryUserAuth(), controller.GetPerfMetricsDetail)
+		apiRouter.GET("/perf-metrics/summary", middleware.TryUserAuth(), controller.GetPerfMetricsSummary)
 		apiRouter.GET("/verification", middleware.EmailVerificationRateLimit(), middleware.TurnstileCheck(), controller.SendEmailVerification)
 		apiRouter.GET("/reset_password", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.SendPasswordResetEmail)
 		apiRouter.POST("/user/reset", middleware.CriticalRateLimit(), controller.ResetPassword)

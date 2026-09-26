@@ -45,6 +45,7 @@ import PricingCardSkeleton from './PricingCardSkeleton';
 import { useMinimumLoadingTime } from '../../../../../hooks/common/useMinimumLoadingTime';
 import { renderLimitedItems } from '../../../../common/ui/RenderUtils';
 import { useIsMobile } from '../../../../../hooks/common/useIsMobile';
+import { useModelPerfMetrics } from '../../../../../hooks/model-pricing/useModelPerfMetrics';
 
 const CARD_STYLES = {
   container:
@@ -85,6 +86,85 @@ const PricingCardView = ({
   );
   const getModelKey = (model) => model.key ?? model.model_name ?? model.id;
   const isMobile = useIsMobile();
+  // 模型状态：从 /api/perf-metrics/summary 拉取性能摘要
+  const { metricsMap } = useModelPerfMetrics(1);
+
+  const formatPerfTps = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '-';
+    if (num >= 100) return num.toFixed(0);
+    if (num >= 10) return num.toFixed(1);
+    return num.toFixed(2);
+  };
+
+  const formatPerfTtft = (value) => {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) return '-';
+    if (num < 1000) return `${Math.round(num)}ms`;
+    return `${(num / 1000).toFixed(2)}s`;
+  };
+
+  const formatPerfRelative = (timestamp) => {
+    const num = Number(timestamp);
+    if (!Number.isFinite(num) || num <= 0) return '-';
+    const diff = Math.max(0, Math.floor(Date.now() / 1000) - num);
+    if (diff < 60) return t('刚刚');
+    if (diff < 3600) return `${Math.floor(diff / 60)}${t('分钟前')}`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}${t('小时前')}`;
+    return `${Math.floor(diff / 86400)}${t('天前')}`;
+  };
+
+  const renderPerfStatusTag = (model) => {
+    const perf = metricsMap.get(model.model_name);
+    const isActive = !!perf && Number(perf.success_count) > 0;
+    return (
+      <Tag shape='circle' size='small' color={isActive ? 'green' : 'grey'}>
+        {isActive ? t('活跃') : t('未使用')}
+      </Tag>
+    );
+  };
+
+  const renderPerfMetrics = (model) => {
+    const perf = metricsMap.get(model.model_name);
+    if (!perf) return null;
+    const cell = 'flex justify-between items-center';
+    const label = 'text-xs';
+    const value = 'text-xs font-medium';
+    return (
+      <div
+        className='pt-3 mt-3 border-t border-dashed grid grid-cols-2 gap-x-4 gap-y-1'
+        style={{ borderColor: 'var(--semi-color-border)' }}
+      >
+        <div className={cell}>
+          <span className={label} style={{ color: 'var(--semi-color-text-2)' }}>TPS</span>
+          <span className={value}>{formatPerfTps(perf.avg_tps)}</span>
+        </div>
+        <div className={cell}>
+          <span className={label} style={{ color: 'var(--semi-color-text-2)' }}>{t('首字延迟')}</span>
+          <span className={value}>{formatPerfTtft(perf.avg_ttft_ms)}</span>
+        </div>
+        <div className={cell}>
+          <span className={label} style={{ color: 'var(--semi-color-text-2)' }}>{t('成功率')}</span>
+          <span className={value}>
+            {Number(perf.total_count) > 0
+              ? `${Number(perf.success_rate).toFixed(1)}%`
+              : '-'}
+          </span>
+        </div>
+        <div className={cell}>
+          <span className={label} style={{ color: 'var(--semi-color-text-2)' }}>{t('最近成功')}</span>
+          <span className={value}>{formatPerfRelative(perf.last_success_at)}</span>
+        </div>
+        <div className={`${cell} col-span-2`}>
+          <span className={label} style={{ color: 'var(--semi-color-text-2)' }}>{t('成功 / 失败')}</span>
+          <span className={value}>
+            {perf.success_count} / {perf.error_count}
+          </span>
+        </div>
+      </div>
+    );
+  };
+
 
   const handleCheckboxChange = (model, checked) => {
     if (!setSelectedRowKeys) return;
@@ -264,9 +344,12 @@ const PricingCardView = ({
                   <div className='flex items-start space-x-3 flex-1 min-w-0'>
                     {getModelIcon(model)}
                     <div className='flex-1 min-w-0'>
-                      <h3 className='text-lg font-bold text-gray-900 truncate'>
-                        {model.model_name}
-                      </h3>
+                      <div className='flex items-center gap-2 min-w-0'>
+                        <h3 className='text-lg font-bold text-gray-900 truncate'>
+                          {model.model_name}
+                        </h3>
+                        {renderPerfStatusTag(model)}
+                      </div>
                       <div className='flex flex-col gap-1 text-xs mt-1'>
                         {priceData.isDynamicPricing ? (
                           formatDynamicPriceSummary(priceData.billingExpr, t, priceData.usedGroupRatio)
@@ -312,6 +395,9 @@ const PricingCardView = ({
                     {getModelDescription(model)}
                   </p>
                 </div>
+
+                {/* 模型状态指标 */}
+                {renderPerfMetrics(model)}
 
                 {/* 底部区域 */}
                 <div className='mt-auto'>
