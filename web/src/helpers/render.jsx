@@ -72,7 +72,6 @@ import {
   MessageSquare,
   Key,
   BarChart3,
-  Mail,
   Image as ImageIcon,
   CheckSquare,
   CreditCard,
@@ -138,8 +137,6 @@ export function getLucideIcon(key, selected = false) {
       return <Key {...commonProps} color={iconColor} />;
     case 'log':
       return <BarChart3 {...commonProps} color={iconColor} />;
-    case 'email_log':
-      return <Mail {...commonProps} color={iconColor} />;
     case 'midjourney':
       return <ImageIcon {...commonProps} color={iconColor} />;
     case 'task':
@@ -373,9 +370,11 @@ export function getChannelIcon(channelType) {
     case 66: // Vercel AI Gateway
       return <Vercel size={iconSize} />;
     case 67: // GMI Cloud
+    case 72: // Xiaomi MiMo
     case 68: // VyceAI
     case 69: // Modal
     case 70: // Kilo
+    case 73: // Cline
       return <Cloud size={iconSize} />;
     case 63: // OpenCode Zen
     case 64: // OpenCode Go

@@ -185,6 +185,7 @@ type RelayInfo struct {
 }
 
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
+	info.ReasoningEffort = ""
 	channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
 	paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)
@@ -315,6 +316,8 @@ func (info *RelayInfo) ToString() string {
 
 // 定义支持流式选项的通道类型
 var streamSupportedChannels = map[int]bool{
+	constant.ChannelTypeCline:       true, // Cline SDK sends stream_options.include_usage.
+	constant.ChannelTypeMiMo:        true, // Verified stream_options.include_usage with MiMo on 2026-09-21.
 	constant.ChannelTypeKilo:        true, // https://kilo.ai/docs/gateway/streaming
 	constant.ChannelTypeAgnesAI:     true, // Verified with stream_options.include_usage on 2026-09-10.
 	constant.ChannelTypeOpenAI:      true,
@@ -557,6 +560,10 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 	var info *RelayInfo
 	var err error
 	switch relayFormat {
+	case types.RelayFormatTypeSafe:
+		info = genBaseRelayInfo(c, request)
+		info.RelayFormat = relayFormat
+		info.DisablePing = true
 	case types.RelayFormatMistralNative, types.RelayFormatMistralRealtime:
 		info = genBaseRelayInfo(c, request)
 		info.RelayFormat = relayFormat

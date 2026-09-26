@@ -145,6 +145,7 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 		if upstreamBytes, bErr := storage.Bytes(); bErr == nil {
+			relaycommon.SetReasoningEffortFromRequest(info, upstreamBytes)
 			relaycommon.SetConversationUpstreamRequest(info, upstreamBytes)
 		}
 		requestBody = common.ReaderOnly(storage)
@@ -168,8 +169,25 @@ func GeminiHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			}
 		}
 
+		if info.ChannelType == constant.ChannelTypeOpenAI {
+			var requiresResponses bool
+			jsonData, requiresResponses, err = normalizeOfficialChatRequest(info, jsonData)
+			if err != nil {
+				return invalidOpenAIModelRequest(err)
+			}
+			if requiresResponses || shouldChatCompletionsUseResponses(info) {
+				usage, apiErr := chatCompletionsViaResponsesBody(c, info, adaptor, jsonData)
+				if apiErr != nil {
+					return apiErr
+				}
+				service.PostTextConsumeQuota(c, info, usage, nil)
+				return nil
+			}
+		}
+
 		logger.LogDebug(c, "Gemini request body: "+string(jsonData))
 
+		relaycommon.SetReasoningEffortFromRequest(info, jsonData)
 		relaycommon.SetConversationUpstreamRequest(info, jsonData)
 		requestBody = bytes.NewReader(jsonData)
 	}

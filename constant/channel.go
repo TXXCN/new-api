@@ -68,7 +68,10 @@ const (
 	ChannelTypeVyceAI         = 68
 	ChannelTypeModal          = 69
 	ChannelTypeKilo           = 70
-	ChannelTypeDummy          = ChannelTypeKilo + 1 // this one is only for count, do not add any channel after this
+	ChannelTypeTypeSafe       = 71
+	ChannelTypeMiMo           = 72
+	ChannelTypeCline          = 73
+	ChannelTypeDummy          = ChannelTypeCline + 1 // this one is only for count, do not add any channel after this
 
 )
 
@@ -144,6 +147,9 @@ var ChannelBaseURLs = []string{
 	"https://vyceai.com",                        //68
 	"",                                          //69, Modal deployments use per-app base URLs
 	"https://api.kilo.ai/api/gateway",           //70
+	"https://api.typesafe.ai",                   //71
+	"https://api.xiaomimimo.com",                //72
+	"https://api.cline.bot/api",                 //73
 }
 
 var ChannelTypeNames = map[int]string{
@@ -214,6 +220,9 @@ var ChannelTypeNames = map[int]string{
 	ChannelTypeVyceAI:         "VyceAI",
 	ChannelTypeModal:          "Modal",
 	ChannelTypeKilo:           "Kilo",
+	ChannelTypeTypeSafe:       "TypeSafe",
+	ChannelTypeMiMo:           "MiMo",
+	ChannelTypeCline:          "Cline",
 }
 
 func GetChannelTypeName(channelType int) string {

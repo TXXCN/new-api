@@ -51,6 +51,7 @@ func GetStatus(c *gin.Context) {
 
 	passkeySetting := system_setting.GetPasskeySettings()
 	legalSetting := system_setting.GetLegalSettings()
+	nodeLocRedirectURI, _ := system_setting.NodeLocRedirectURI(system_setting.ServerAddress)
 
 	data := gin.H{
 		"version":                     common.Version,
@@ -61,6 +62,9 @@ func GetStatus(c *gin.Context) {
 		"discord_oauth":               system_setting.GetDiscordSettings().Enabled,
 		"discord_client_id":           system_setting.GetDiscordSettings().ClientId,
 		"linuxdo_oauth":               common.LinuxDOOAuthEnabled,
+		"nodeloc_oauth":               system_setting.GetNodeLocSettings().Enabled,
+		"nodeloc_client_id":           system_setting.GetNodeLocSettings().ClientId,
+		"nodeloc_redirect_uri":        nodeLocRedirectURI,
 		"linuxdo_client_id":           common.LinuxDOClientId,
 		"linuxdo_minimum_trust_level": common.LinuxDOMinimumTrustLevel,
 		"telegram_oauth":              common.TelegramOAuthEnabled,
@@ -374,7 +378,11 @@ func ResetPassword(c *gin.Context) {
 		})
 		return
 	}
-	password := common.GenerateVerificationCode(12)
+	password, err := common.GenerateLoginPassword()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	err = model.ResetUserPasswordByEmail(req.Email, password)
 	if err != nil {
 		if errors.Is(err, model.ErrEmailIdentityAmbiguous) {

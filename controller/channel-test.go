@@ -40,10 +40,11 @@ import (
 )
 
 type testResult struct {
-	context     *gin.Context
-	localErr    error
-	newAPIError *types.NewAPIError
-	rateLimit   *channelRateLimitInfo
+	context       *gin.Context
+	localErr      error
+	newAPIError   *types.NewAPIError
+	rateLimit     *channelRateLimitInfo
+	upstreamModel string
 }
 
 type channelRateLimitInfo struct {
@@ -259,6 +260,9 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	if normalized != "" {
 		return normalized
 	}
+	if channel != nil && channel.Type == constant.ChannelTypeTypeSafe {
+		return string(constant.EndpointTypeTypeSafeSystemOne)
+	}
 	if channel != nil && channel.Type == constant.ChannelTypeMistral {
 		if mistral.IsTranscriptionModel(modelName) {
 			return string(constant.EndpointTypeAudioTranscription)
@@ -298,6 +302,9 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	}
 	if channel != nil && channel.Type == constant.ChannelTypeGMICloud && gmicloud.IsBatchModel(modelName) {
 		return string(constant.EndpointTypeBatchGeneration)
+	}
+	if channel != nil && channel.Type == constant.ChannelTypeGMICloud && gmicloud.IsImageModel(modelName) {
+		return string(constant.EndpointTypeImageGeneration)
 	}
 	if channel != nil && channel.Type == constant.ChannelTypeVyceAI {
 		return string(constant.EndpointTypeImageGeneration)
@@ -367,11 +374,23 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 			}
 			if testModel == "" {
 				testModel = "gpt-4o-mini"
+				if channel.Type == constant.ChannelTypeTypeSafe {
+					testModel = "jev-latest"
+				}
 			}
 		}
 	}
 
 	endpointType = normalizeChannelTestEndpoint(channel, testModel, endpointType)
+	if channel.Type == constant.ChannelTypeTypeSafe {
+		if endpointType != string(constant.EndpointTypeTypeSafeSystemOne) {
+			return testResult{localErr: errors.New("TypeSafe only supports /v1/systemone")}
+		}
+		isStream = false
+	}
+	if endpointType == string(constant.EndpointTypeTypeSafeSystemOne) && channel.Type != constant.ChannelTypeTypeSafe {
+		return testResult{localErr: errors.New("/v1/systemone requires a TypeSafe channel")}
+	}
 
 	requestPath := "/v1/chat/completions"
 
@@ -458,6 +477,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	// 根据指定的端点类型设置 relayFormat
 	if endpointType != "" {
 		switch constant.EndpointType(endpointType) {
+		case constant.EndpointTypeTypeSafeSystemOne:
+			relayFormat = types.RelayFormatTypeSafe
 		case constant.EndpointTypeOpenAI, constant.EndpointTypeCohereChat:
 			relayFormat = types.RelayFormatOpenAI
 		case constant.EndpointTypeOpenAIResponse:
@@ -511,7 +532,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	}
 
 	if constant.EndpointType(endpointType) == constant.EndpointTypeOpenAIVideo ||
-		constant.EndpointType(endpointType) == constant.EndpointTypeBatchGeneration {
+		constant.EndpointType(endpointType) == constant.EndpointTypeBatchGeneration ||
+		(channel.Type == constant.ChannelTypeGMICloud && gmicloud.IsImageModel(testModel)) {
 		return testTaskChannel(c, channel, testModel, tik)
 	}
 
@@ -591,6 +613,8 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	var convertedAudioReader io.Reader
 	// 根据 RelayMode 选择正确的转换函数
 	switch info.RelayMode {
+	case relayconstant.RelayModeTypeSafeSystemOne:
+		convertedRequest = request
 	case relayconstant.RelayModeAudioSpeech, relayconstant.RelayModeAudioTranscription, relayconstant.RelayModeAudioTranslation:
 		if audioReq, ok := request.(*dto.AudioRequest); ok {
 			if channel.Type == constant.ChannelTypeMistral && info.RelayMode == relayconstant.RelayModeAudioTranscription {
@@ -736,6 +760,18 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 			}
 		}
 	}
+	if channel.Type == constant.ChannelTypeOpenAI {
+		jsonData, err = prepareOpenAIChannelTestRequest(info, jsonData)
+		if err != nil {
+			return testResult{context: c, localErr: err, newAPIError: types.NewErrorWithStatusCode(err, types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())}
+		}
+	}
+	if info.RelayMode == relayconstant.RelayModeTypeSafeSystemOne {
+		var effective dto.TypeSafeRequest
+		if err := common.Unmarshal(jsonData, &effective); err != nil {
+			return testResult{context: c, localErr: err, newAPIError: types.NewError(err, types.ErrorCodeInvalidRequest)}
+		}
+	}
 
 	reservation, reserveErr := reserveChannelDailySuccess(channel)
 	if reserveErr != nil {
@@ -788,6 +824,7 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	if httpResp != nil {
 		rateLimit = extractChannelRateLimitInfo(channel, info.UpstreamModelName, httpResp.Header)
 	}
+	responseCapture := captureTestUpstreamResponse(info, httpResp)
 	usageA, respErr := adaptor.DoResponse(c, httpResp, info)
 	if respErr != nil {
 		return testResult{
@@ -843,10 +880,11 @@ func testChannel(channel *model.Channel, testModel string, endpointType string, 
 	common.SysLog(fmt.Sprintf("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
 	testSucceeded = true
 	return testResult{
-		context:     c,
-		localErr:    nil,
-		newAPIError: nil,
-		rateLimit:   rateLimit,
+		context:       c,
+		localErr:      nil,
+		newAPIError:   nil,
+		rateLimit:     rateLimit,
+		upstreamModel: extractTestUpstreamModel(responseCapture.Snapshot().UpstreamResponseBody),
 	}
 }
 
@@ -946,7 +984,14 @@ func testTaskChannel(c *gin.Context, channel *model.Channel, testModel string, t
 	taskEndpointType := constant.EndpointTypeOpenAIVideo
 	var jsonData []byte
 	var err error
-	if channel.Type == constant.ChannelTypeGMICloud && gmicloud.IsBatchModel(testModel) {
+	if channel.Type == constant.ChannelTypeGMICloud && gmicloud.IsImageModel(testModel) {
+		taskEndpointType = constant.EndpointTypeImageGeneration
+		c.Request.URL.Path = "/v1/images/tasks"
+		jsonData, err = common.Marshal(map[string]any{
+			"model":   testModel,
+			"payload": map[string]any{"prompt": "A small red apple on a white background", "size": "1920x1080"},
+		})
+	} else if channel.Type == constant.ChannelTypeGMICloud && gmicloud.IsBatchModel(testModel) {
 		taskEndpointType = constant.EndpointTypeBatchGeneration
 		jsonData, err = common.Marshal(map[string]any{
 			"model": testModel,
@@ -1076,6 +1121,7 @@ func testTaskChannel(c *gin.Context, channel *model.Channel, testModel string, t
 	}
 
 	rateLimit := extractChannelRateLimitInfo(channel, info.UpstreamModelName, resp.Header)
+	responseCapture := captureTestUpstreamResponse(info, resp)
 	taskID, _, taskErr := adaptor.DoResponse(c, resp, info)
 	if taskErr != nil {
 		return taskErrorToTestResult(c, taskErr)
@@ -1103,10 +1149,11 @@ func testTaskChannel(c *gin.Context, channel *model.Channel, testModel string, t
 	common.SysLog(fmt.Sprintf("testing channel #%d, task id: %s", channel.Id, taskID))
 	testSucceeded = true
 	return testResult{
-		context:     c,
-		localErr:    nil,
-		newAPIError: nil,
-		rateLimit:   rateLimit,
+		context:       c,
+		localErr:      nil,
+		newAPIError:   nil,
+		rateLimit:     rateLimit,
+		upstreamModel: extractTestUpstreamModel(responseCapture.Snapshot().UpstreamResponseBody),
 	}
 }
 
@@ -1285,6 +1332,13 @@ func detectErrorMessageFromJSONBytes(jsonBytes []byte) string {
 }
 
 func buildTestRequest(model string, endpointType string, channel *model.Channel, isStream bool) dto.Request {
+	if constant.EndpointType(endpointType) == constant.EndpointTypeTypeSafeSystemOne ||
+		(endpointType == "" && channel != nil && channel.Type == constant.ChannelTypeTypeSafe) {
+		return &dto.TypeSafeRequest{Model: model, Fields: map[string]json.RawMessage{
+			"state":     json.RawMessage(`"Please help urgently."`),
+			"questions": json.RawMessage(`{"urgent":{"type":"noul","instructions":"Does this message express urgency?"}}`),
+		}}
+	}
 	testResponsesInput := json.RawMessage(`[{"role":"user","content":"hi"}]`)
 
 	// 根据端点类型构建不同的测试请求
@@ -1429,7 +1483,11 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 		testRequest.StreamOptions = &dto.StreamOptions{IncludeUsage: common.GetPointer(true)}
 	}
 
-	if strings.HasPrefix(model, "o") {
+	channelType := constant.ChannelTypeOpenAI
+	if channel != nil {
+		channelType = channel.Type
+	}
+	if useOpenAICompletionTokens(model, channelType) {
 		testRequest.MaxCompletionTokens = lo.ToPtr(uint(16))
 	} else if strings.Contains(model, "thinking") {
 		if !strings.Contains(model, "claude") {
@@ -1514,9 +1572,10 @@ func TestChannel(c *gin.Context) {
 		return
 	}
 	resp := gin.H{
-		"success": true,
-		"message": "",
-		"time":    consumedTime,
+		"success":        true,
+		"message":        "",
+		"time":           consumedTime,
+		"upstream_model": result.upstreamModel,
 	}
 	if result.rateLimit != nil {
 		resp["rate_limit"] = result.rateLimit

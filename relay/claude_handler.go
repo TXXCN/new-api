@@ -48,7 +48,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 	adaptor.Init(info)
 
-	if request.MaxTokens == nil || (*request.MaxTokens == 0 && info.ChannelType != constant.ChannelTypeAgnesAI && info.ChannelType != constant.ChannelTypeDeepSeek) {
+	if request.MaxTokens == nil || (*request.MaxTokens == 0 && info.ChannelType != constant.ChannelTypeAgnesAI && info.ChannelType != constant.ChannelTypeDeepSeek && info.ChannelType != constant.ChannelTypeMiMo) {
 		defaultMaxTokens := uint(model_setting.GetClaudeSettings().GetDefaultMaxTokens(request.Model))
 		request.MaxTokens = &defaultMaxTokens
 	}
@@ -130,7 +130,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 	}
 
 	passThrough := shouldPassThroughTextRequest(info, model_setting.GetGlobalSettings().PassThroughRequestEnabled)
-	if !passThrough &&
+	if !passThrough && info.ChannelType != constant.ChannelTypeOpenAI &&
 		shouldChatCompletionsUseResponses(info) {
 		openAIRequest, convErr := service.ClaudeToOpenAIRequest(*request, info)
 		if convErr != nil {
@@ -154,6 +154,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 		}
 		if upstreamBytes, bErr := storage.Bytes(); bErr == nil {
+			relaycommon.SetReasoningEffortFromRequest(info, upstreamBytes)
 			relaycommon.SetConversationUpstreamRequest(info, upstreamBytes)
 		}
 		requestBody = common.ReaderOnly(storage)
@@ -181,10 +182,26 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+		if info.ChannelType == constant.ChannelTypeOpenAI {
+			var requiresResponses bool
+			jsonData, requiresResponses, err = normalizeOfficialChatRequest(info, jsonData)
+			if err != nil {
+				return invalidOpenAIModelRequest(err)
+			}
+			if requiresResponses || shouldChatCompletionsUseResponses(info) {
+				usage, apiErr := chatCompletionsViaResponsesBody(c, info, adaptor, jsonData)
+				if apiErr != nil {
+					return apiErr
+				}
+				service.PostTextConsumeQuota(c, info, usage, nil)
+				return nil
+			}
+		}
 
 		if common.DebugEnabled {
 			println("requestBody: ", string(jsonData))
 		}
+		relaycommon.SetReasoningEffortFromRequest(info, jsonData)
 		relaycommon.SetConversationUpstreamRequest(info, jsonData)
 		requestBody = bytes.NewBuffer(jsonData)
 	}

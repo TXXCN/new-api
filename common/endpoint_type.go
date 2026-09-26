@@ -4,12 +4,17 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/openaimodel"
 )
 
 // GetEndpointTypesByChannelType returns the preferred endpoint types for a channel/model pair.
 func GetEndpointTypesByChannelType(channelType int, modelName string) []constant.EndpointType {
 	var endpointTypes []constant.EndpointType
 	switch channelType {
+	case constant.ChannelTypeMiMo:
+		return []constant.EndpointType{constant.EndpointTypeOpenAI, constant.EndpointTypeAnthropic}
+	case constant.ChannelTypeTypeSafe:
+		return []constant.EndpointType{constant.EndpointTypeTypeSafeSystemOne}
 	case constant.ChannelTypeJina:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeJinaRerank}
 	case constant.ChannelTypeCohere:
@@ -30,10 +35,12 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeGemini, constant.EndpointTypeOpenAI}
 	case constant.ChannelTypeOpenRouter:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}
-	case constant.ChannelTypeModal, constant.ChannelTypeKilo:
+	case constant.ChannelTypeModal, constant.ChannelTypeKilo, constant.ChannelTypeCline:
 		endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}
 	case constant.ChannelTypeGMICloud:
-		if strings.EqualFold(strings.TrimSpace(modelName), "Gemini-batch-inference") {
+		if strings.TrimSpace(modelName) == "hy-image-v3.5-preview" {
+			return []constant.EndpointType{constant.EndpointTypeImageGeneration}
+		} else if strings.EqualFold(strings.TrimSpace(modelName), "Gemini-batch-inference") {
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeBatchGeneration}
 		} else {
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}
@@ -85,7 +92,8 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeAudioSpeech, constant.EndpointTypeAudioTranscription}
 		}
 	default:
-		if IsOpenAIResponseOnlyModel(modelName) {
+		_, _, capabilities, known := openaimodel.Resolve(modelName)
+		if known && (capabilities.LegacyResponsesOnly || (channelType == constant.ChannelTypeOpenAI && capabilities.ResponsesOnly)) {
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAIResponse}
 		} else {
 			endpointTypes = []constant.EndpointType{constant.EndpointTypeOpenAI}

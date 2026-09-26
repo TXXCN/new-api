@@ -17,6 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
+import {
+  isValidLoginPassword,
+  PASSWORD_POLICY_MESSAGE,
+} from '../../helpers/password';
 import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
@@ -54,10 +58,12 @@ import {
 import {
   onGitHubOAuthClicked,
   onLinuxDOOAuthClicked,
+  onNodeLocOAuthClicked,
   onOIDCClicked,
 } from '../../helpers';
 import OIDCIcon from '../common/logo/OIDCIcon';
 import LinuxDoIcon from '../common/logo/LinuxDoIcon';
+import NodeLocIcon from '../common/logo/NodeLocIcon';
 import WeChatIcon from '../common/logo/WeChatIcon';
 import TelegramLoginButton from 'react-telegram-login/src';
 import { UserContext } from '../../context/User';
@@ -110,6 +116,7 @@ const RegisterForm = () => {
   const [discordLoading, setDiscordLoading] = useState(false);
   const [oidcLoading, setOidcLoading] = useState(false);
   const [linuxdoLoading, setLinuxdoLoading] = useState(false);
+  const [nodelocLoading, setNodelocLoading] = useState(false);
   const [emailRegisterLoading, setEmailRegisterLoading] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
   const [verificationCodeLoading, setVerificationCodeLoading] = useState(false);
@@ -148,6 +155,7 @@ const RegisterForm = () => {
       status.oidc_enabled ||
       status.wechat_login ||
       status.linuxdo_oauth ||
+      status.nodeloc_oauth ||
       status.telegram_oauth ||
       hasCustomOAuthProviders,
   );
@@ -283,8 +291,8 @@ const RegisterForm = () => {
   }
 
   async function handleSubmit(e) {
-    if (password.length < 8) {
-      showInfo('密码长度不得小于 8 位！');
+    if (!isValidLoginPassword(password)) {
+      showInfo(t(PASSWORD_POLICY_MESSAGE));
       return;
     }
     if (password !== password2) {
@@ -408,6 +416,18 @@ const RegisterForm = () => {
       onLinuxDOOAuthClicked(status.linuxdo_client_id, registrationOAuthOptions);
     } finally {
       setTimeout(() => setLinuxdoLoading(false), 3000);
+    }
+  };
+
+  const handleNodeLocClick = async () => {
+    if (!ensureRequiredRegistrationCodes()) {
+      return;
+    }
+    setNodelocLoading(true);
+    try {
+      await onNodeLocOAuthClicked(status, registrationOAuthOptions);
+    } finally {
+      setNodelocLoading(false);
     }
   };
 
@@ -603,6 +623,27 @@ const RegisterForm = () => {
                   </Button>
                 )}
 
+                {status.nodeloc_oauth && (
+                  <Button
+                    theme='outline'
+                    className='w-full h-12 flex items-center justify-center !rounded-full border border-gray-200 hover:bg-gray-50 transition-colors'
+                    type='tertiary'
+                    icon={
+                      <NodeLocIcon
+                        style={{
+                          color: 'currentColor',
+                          width: '20px',
+                          height: '20px',
+                        }}
+                      />
+                    }
+                    onClick={handleNodeLocClick}
+                    loading={nodelocLoading}
+                  >
+                    <span className='ml-3'>{t('使用 NodeLoc 继续')}</span>
+                  </Button>
+                )}
+
                 {status.custom_oauth_providers &&
                   status.custom_oauth_providers.map((provider) => (
                     <Button
@@ -694,7 +735,8 @@ const RegisterForm = () => {
                 <Form.Input
                   field='password'
                   label={t('密码')}
-                  placeholder={t('输入密码，最短 8 位，最长 20 位')}
+                  placeholder={t('请输入密码')}
+                  extraText={t(PASSWORD_POLICY_MESSAGE)}
                   name='password'
                   mode='password'
                   onChange={(value) => handleChange('password', value)}

@@ -22,9 +22,11 @@ import (
 )
 
 type Adaptor struct {
-	openAI openai.Adaptor
-	claude claude.Adaptor
-	gemini gemini.Adaptor
+	openAI             openai.Adaptor
+	claude             claude.Adaptor
+	gemini             gemini.Adaptor
+	freeRequestMode    constant.OpenCodeEndpoint
+	freeResponseStream *freeStream
 }
 
 type GoAdaptor struct {
@@ -42,6 +44,8 @@ func endpoint(info *relaycommon.RelayInfo) constant.OpenCodeEndpoint {
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
+	a.freeRequestMode = endpoint(info)
+	a.freeResponseStream = nil
 	switch endpoint(info) {
 	case constant.OpenCodeEndpointMessages:
 		a.claude.Init(info)
@@ -80,14 +84,28 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, header *http.Header, info *relaycommon.RelayInfo) error {
+	var err error
 	switch endpoint(info) {
 	case constant.OpenCodeEndpointMessages:
-		return a.claude.SetupRequestHeader(c, header, info)
+		err = a.claude.SetupRequestHeader(c, header, info)
 	case constant.OpenCodeEndpointGemini:
-		return a.gemini.SetupRequestHeader(c, header, info)
+		err = a.gemini.SetupRequestHeader(c, header, info)
 	default:
-		return a.openAI.SetupRequestHeader(c, header, info)
+		err = a.openAI.SetupRequestHeader(c, header, info)
 	}
+	if err != nil {
+		return err
+	}
+	// Preserve client identifiers independently of whether missing values are filled.
+	for _, name := range []string{"User-Agent", "x-opencode-client", "x-opencode-session", "x-opencode-request", "x-opencode-project", "x-parent-session-id"} {
+		if value := c.GetHeader(name); value != "" {
+			header.Set(name, value)
+		}
+	}
+	if info.ChannelOtherSettings.ShouldFillOpenCodeClientHeaders() {
+		return fillClientHeaders(c, header)
+	}
+	return nil
 }
 
 func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (any, error) {
@@ -100,6 +118,14 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 		return a.gemini.ConvertOpenAIRequest(c, info, request)
 	default:
 		return a.openAI.ConvertOpenAIRequest(c, info, request)
+	}
+}
+
+func (a *Adaptor) FilterHeaderPassthrough(headers map[string]string, info *relaycommon.RelayInfo) {
+	if info.ChannelOtherSettings.ShouldFillOpenCodeClientHeaders() {
+		if value, ok := headers["user-agent"]; ok {
+			headers["user-agent"] = openCodeUserAgent(value)
+		}
 	}
 }
 
@@ -161,10 +187,33 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
+	if a.needsFreeCompatibility(info) {
+		return a.doFreeRequest(c, info, requestBody)
+	}
 	return channel.DoApiRequest(a, c, info, requestBody)
 }
 
 func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
+	return a.guardFreeResponse(c, func() (any, *types.NewAPIError) {
+		return a.doResponse(c, resp, info)
+	})
+}
+
+// The shared Chat/Messages-to-Responses path must use the same stream guard.
+func (a *Adaptor) DoResponsesToChatResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
+	usage, err := a.guardFreeResponse(c, func() (any, *types.NewAPIError) {
+		if info.IsStream {
+			return openai.OaiResponsesToChatStreamHandler(c, info, resp)
+		}
+		return openai.OaiResponsesToChatHandler(c, info, resp)
+	})
+	if usage == nil {
+		return nil, err
+	}
+	return usage.(*dto.Usage), err
+}
+
+func (a *Adaptor) doResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (usage any, err *types.NewAPIError) {
 	switch endpoint(info) {
 	case constant.OpenCodeEndpointMessages:
 		return a.claude.DoResponse(c, resp, info)

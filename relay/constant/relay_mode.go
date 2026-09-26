@@ -58,11 +58,16 @@ const (
 	RelayModeResponsesCompact
 
 	RelayModeOpenAILocalSearch
+	RelayModeTypeSafeSystemOne
+	RelayModeImageTaskSubmit
+	RelayModeImageTaskFetchByID
 )
 
 func Path2RelayMode(path string) int {
 	relayMode := RelayModeUnknown
-	if strings.HasPrefix(path, "/v1/chat/completions") || strings.HasPrefix(path, "/pg/chat/completions") {
+	if path == "/v1/systemone" {
+		relayMode = RelayModeTypeSafeSystemOne
+	} else if strings.HasPrefix(path, "/v1/chat/completions") || strings.HasPrefix(path, "/pg/chat/completions") {
 		relayMode = RelayModeChatCompletions
 	} else if strings.HasPrefix(path, "/v1/completions") {
 		relayMode = RelayModeCompletions
@@ -72,6 +77,10 @@ func Path2RelayMode(path string) int {
 		relayMode = RelayModeEmbeddings
 	} else if strings.HasPrefix(path, "/v1/moderations") {
 		relayMode = RelayModeModerations
+	} else if path == "/v1/images/tasks" {
+		relayMode = RelayModeImageTaskSubmit
+	} else if strings.HasPrefix(path, "/v1/images/tasks/") {
+		relayMode = RelayModeImageTaskFetchByID
 	} else if strings.HasPrefix(path, "/v1/images/generations") {
 		relayMode = RelayModeImagesGenerations
 	} else if strings.HasPrefix(path, "/v1/images/edits") {
