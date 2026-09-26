@@ -91,7 +91,7 @@ const PricingCardView = ({
 
   const formatPerfTps = (value) => {
     const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '-';
+    if (!Number.isFinite(num) || num <= 0) return 'N/A';
     if (num >= 100) return num.toFixed(0);
     if (num >= 10) return num.toFixed(1);
     return num.toFixed(2);
@@ -99,17 +99,17 @@ const PricingCardView = ({
 
   const formatPerfTtft = (value) => {
     const num = Number(value);
-    if (!Number.isFinite(num) || num <= 0) return '-';
+    if (!Number.isFinite(num) || num <= 0) return 'N/A';
     if (num < 1000) return `${Math.round(num)}ms`;
     return `${(num / 1000).toFixed(2)}s`;
   };
 
   const formatPerfRelative = (timestamp) => {
     const num = Number(timestamp);
-    if (!Number.isFinite(num) || num <= 0) return '-';
+    if (!Number.isFinite(num) || num <= 0) return t('从未使用过');
     const diff = Math.max(0, Math.floor(Date.now() / 1000) - num);
-    if (diff < 60) return t('刚刚');
-    if (diff < 3600) return `${Math.floor(diff / 60)}${t('分钟前')}`;
+    if (diff < 60) return `${diff}${t('秒前')}`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}${t('分前')}`;
     if (diff < 86400) return `${Math.floor(diff / 3600)}${t('小时前')}`;
     return `${Math.floor(diff / 86400)}${t('天前')}`;
   };
@@ -148,7 +148,7 @@ const PricingCardView = ({
           <span className={value}>
             {Number(perf.total_count) > 0
               ? `${Number(perf.success_rate).toFixed(1)}%`
-              : '-'}
+              : 'N/A'}
           </span>
         </div>
         <div className={cell}>
