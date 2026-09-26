@@ -243,7 +243,9 @@ func queryRecentStats(modelName string) (int64, string) {
 
 // GetPerfMetricsSummary 按模型聚合性能指标，供模型广场卡片展示。
 func GetPerfMetricsSummary(windowHours int) (*PerfMetricsSummaryResult, error) {
-	windowHours = normalizePerfWindowHours(windowHours)
+	// 模型广场卡片需要覆盖「所有最近使用过」的模型，因此忽略调用方传入的
+	// 短窗口，统一按 24 小时统计，避免刚用过的模型被判定为未使用。
+	windowHours = 24
 	now := common.GetTimestamp()
 	since := now - int64(windowHours)*3600
 	result := &PerfMetricsSummaryResult{

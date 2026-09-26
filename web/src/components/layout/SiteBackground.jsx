@@ -21,6 +21,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   normalizeSiteBackgroundConfig,
   resolveSiteBackgroundAsset,
+  resolveSiteBackground,
 } from '../../services/siteBackground';
 import SiteBackgroundGlassFilter from './SiteBackgroundGlassFilter';
 import SiteBackgroundGlassCanvas from './SiteBackgroundGlassCanvas';
@@ -63,10 +64,23 @@ const SiteBackground = ({ config, onAssetChange }) => {
         }
       })
       .catch((error) => {
-        if (active && error?.name !== 'AbortError') {
-          console.warn('站点背景加载失败:', error);
-          setImageAsset(null);
-        }
+        if (error?.name === 'AbortError' || !active) return undefined;
+        // 图源经跨域重定向时，中间跳缺少 CORS 头会导致 fetch 失败。
+        // 这里回退到 <img> 直连（img 不受 CORS 限制），保证背景仍能显示。
+        return resolveSiteBackground(normalizedConfig.sources, {
+          signal: controller.signal,
+        })
+          .then((result) => {
+            if (active && result?.url) {
+              setImageAsset({ url: result.url, source: result.source });
+            }
+          })
+          .catch((fallbackError) => {
+            if (active && fallbackError?.name !== 'AbortError') {
+              console.warn('站点背景加载失败:', fallbackError);
+              setImageAsset(null);
+            }
+          });
       });
 
     return () => {
@@ -81,7 +95,10 @@ const SiteBackground = ({ config, onAssetChange }) => {
 
   useEffect(
     () => () => {
-      if (imageAsset?.url) URL.revokeObjectURL(imageAsset.url);
+      // 仅释放 blob: 地址，<img> 直连的远程地址不能 revoke
+      if (imageAsset?.url && imageAsset.url.startsWith('blob:')) {
+        URL.revokeObjectURL(imageAsset.url);
+      }
     },
     [imageAsset],
   );

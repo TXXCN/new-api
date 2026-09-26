@@ -28,6 +28,7 @@ import {
   IconHistogram,
 } from '@douyinfe/semi-icons';
 import { VChart } from '@visactor/react-vchart';
+import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
 
 import { API } from '../../../../../helpers/api';
 
@@ -135,6 +136,14 @@ const MetricCard = ({ icon, label, value, valueColor, valueClassName, valueStyle
 // 性能页：数据来自 /api/perf-metrics，展示模型性能指标、分组表现与趋势
 const ModelPerformance = ({ modelData, t }) => {
   const modelName = modelData?.model_name || modelData?.modelName || '';
+
+  // 图表跟随 Semi 主题（深色模式下避免出现白底）
+  useEffect(() => {
+    initVChartSemiTheme({
+      isWatchingThemeSwitch: true,
+    });
+  }, []);
+
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [groups, setGroups] = useState([]);
