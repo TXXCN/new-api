@@ -116,10 +116,22 @@ const PricingCardView = ({
 
   const renderPerfStatusTag = (model) => {
     const perf = metricsMap.get(model.model_name);
-    const isActive = !!perf && Number(perf.success_count) > 0;
+    const status = (perf && perf.health_status) || 'unused';
+    const colorMap = {
+      active: 'green',
+      idle: 'light-blue',
+      error: 'red',
+      unused: 'grey',
+    };
+    const labelMap = {
+      active: t('活跃'),
+      idle: t('空闲'),
+      error: t('异常'),
+      unused: t('未使用'),
+    };
     return (
-      <Tag shape='circle' size='small' color={isActive ? 'green' : 'grey'}>
-        {isActive ? t('活跃') : t('未使用')}
+      <Tag shape='circle' size='small' color={colorMap[status] || 'grey'}>
+        {labelMap[status] || t('未使用')}
       </Tag>
     );
   };
@@ -127,6 +139,7 @@ const PricingCardView = ({
   const renderPerfMetrics = (model) => {
     const perf = metricsMap.get(model.model_name);
     if (!perf) return null;
+    if (perf.health_status === 'unused') return null;
     const cell = 'flex justify-between items-center';
     const label = 'text-xs';
     const value = 'text-xs font-medium';

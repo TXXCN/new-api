@@ -15,6 +15,7 @@ const (
 	perfMetricsSeriesBucket  = 3600
 	perfMetricsSeriesMaxRows = 4000
 	perfMetricsFailScanRows  = 200
+	perfMetricsActiveWindow  = 3600
 )
 
 // PerfMetricModel 是模型广场卡片使用的单模型性能指标，延迟单位统一为毫秒。
@@ -28,6 +29,15 @@ type PerfMetricModel struct {
 	ErrorCount    int64   `json:"error_count"`
 	TotalCount    int64   `json:"total_count"`
 	LastSuccessAt int64   `json:"last_success_at"`
+
+	// 以下字段对齐参考站 summary/detail 的扁平结构
+	LastSuccessTs       int64  `json:"last_success_ts"`
+	LastRequestTs       int64  `json:"last_request_ts"`
+	ConsecutiveFailures int64  `json:"consecutive_failures"`
+	LastErrorType       string `json:"last_error_type"`
+	HealthStatus        string `json:"health_status"`
+	SuccessCount24h     int64  `json:"success_count_24h"`
+	FailureCount24h     int64  `json:"failure_count_24h"`
 }
 
 // PerfMetricSeriesPoint 是分组时间序列上的一个采样点。
@@ -125,6 +135,9 @@ func normalizePerfWindowHours(hours int) int {
 	return hours
 }
 
+// buildPerfMetricModel 组装指标。首 token 延迟优先取流式请求上报的 frt；
+// 若没有任何 frt 样本（全部为非流式请求），则退化为平均延迟，
+// 因为非流式请求的「首 token」在语义上等同于完整响应返回的时刻。
 func buildPerfMetricModel(successCount, errorCount, totalUseTime, completionTokens, lastSuccessAt int64, frtSumMs float64, frtSamples int64) PerfMetricModel {
 	metric := PerfMetricModel{
 		SuccessCount:  successCount,
@@ -141,11 +154,13 @@ func buildPerfMetricModel(successCount, errorCount, totalUseTime, completionToke
 	}
 	if frtSamples > 0 {
 		metric.AvgTtftMs = frtSumMs / float64(frtSamples)
+	} else if metric.AvgLatencyMs > 0 {
+		metric.AvgTtftMs = metric.AvgLatencyMs
 	}
 	return metric
 }
 
-// perfHealthStatus 依据最近成功时间与连续失败数推断状态：active / idle / error / unused。
+// perfHealthStatus 依据最近请求时间与连续失败数推断状态：active / idle / error / unused。
 func perfHealthStatus(lastSuccessAt, lastRequestAt int64, consecutiveFailures int64, now int64) string {
 	if lastRequestAt <= 0 {
 		return "unused"
@@ -153,7 +168,7 @@ func perfHealthStatus(lastSuccessAt, lastRequestAt int64, consecutiveFailures in
 	if consecutiveFailures >= 3 {
 		return "error"
 	}
-	if lastSuccessAt > 0 && now-lastSuccessAt <= 3600 {
+	if lastSuccessAt > 0 && now-lastSuccessAt <= perfMetricsActiveWindow {
 		return "active"
 	}
 	return "idle"
@@ -174,6 +189,7 @@ func summarizePerfError(content string) string {
 	return text
 }
 
+// collectPerfFrtByModel 汇总窗口内各模型上报的首 token 毫秒数。
 func collectPerfFrtByModel(since int64) (map[string]float64, map[string]int64) {
 	sumByModel := make(map[string]float64)
 	countByModel := make(map[string]int64)
@@ -199,10 +215,37 @@ func collectPerfFrtByModel(since int64) (map[string]float64, map[string]int64) {
 	return sumByModel, countByModel
 }
 
+// queryRecentStats 取模型最近若干条日志，得出连续失败数与最近错误类型。
+func queryRecentStats(modelName string) (int64, string) {
+	recent := make([]perfMetricsRecentRow, 0)
+	_ = LOG_DB.Table("logs").
+		Select("type, content").
+		Where("model_name = ?", modelName).
+		Where("type IN ?", []int{LogTypeConsume, LogTypeError}).
+		Order("id DESC").
+		Limit(perfMetricsFailScanRows).
+		Scan(&recent).Error
+
+	var consecutiveFailures int64
+	var lastErrorType string
+	for _, row := range recent {
+		if row.Type == LogTypeError {
+			consecutiveFailures++
+			if lastErrorType == "" {
+				lastErrorType = summarizePerfError(row.Content)
+			}
+			continue
+		}
+		break
+	}
+	return consecutiveFailures, lastErrorType
+}
+
 // GetPerfMetricsSummary 按模型聚合性能指标，供模型广场卡片展示。
 func GetPerfMetricsSummary(windowHours int) (*PerfMetricsSummaryResult, error) {
 	windowHours = normalizePerfWindowHours(windowHours)
-	since := common.GetTimestamp() - int64(windowHours)*3600
+	now := common.GetTimestamp()
+	since := now - int64(windowHours)*3600
 	result := &PerfMetricsSummaryResult{
 		WindowHours: windowHours,
 		Models:      []PerfMetricModel{},
@@ -225,6 +268,22 @@ func GetPerfMetricsSummary(windowHours int) (*PerfMetricsSummaryResult, error) {
 		return nil, err
 	}
 
+	// 24 小时窗口的计数（卡片与详情都会用到）
+	count24Rows := make([]perfMetricsAggRow, 0)
+	_ = LOG_DB.Table("logs").
+		Select("model_name, "+
+			"COALESCE(SUM(CASE WHEN type = ? THEN 1 ELSE 0 END), 0) AS success_count, "+
+			"COALESCE(SUM(CASE WHEN type = ? THEN 1 ELSE 0 END), 0) AS error_count",
+			LogTypeConsume, LogTypeError).
+		Where("created_at >= ?", now-24*3600).
+		Where("type IN ?", []int{LogTypeConsume, LogTypeError}).
+		Group("model_name").
+		Scan(&count24Rows).Error
+	count24 := make(map[string]perfMetricsAggRow, len(count24Rows))
+	for _, row := range count24Rows {
+		count24[strings.TrimSpace(row.ModelName)] = row
+	}
+
 	frtSum, frtCount := collectPerfFrtByModel(since)
 
 	for _, row := range rows {
@@ -237,6 +296,19 @@ func GetPerfMetricsSummary(windowHours int) (*PerfMetricsSummaryResult, error) {
 			row.LastSuccessAt, frtSum[name], frtCount[name],
 		)
 		metric.ModelName = name
+		metric.LastSuccessTs = row.LastSuccessAt
+		metric.LastRequestTs = row.LastRequestAt
+
+		consecutiveFailures, lastErrorType := queryRecentStats(name)
+		metric.ConsecutiveFailures = consecutiveFailures
+		metric.LastErrorType = lastErrorType
+		metric.HealthStatus = perfHealthStatus(row.LastSuccessAt, row.LastRequestAt, consecutiveFailures, now)
+
+		if c, ok := count24[name]; ok {
+			metric.SuccessCount24h = c.SuccessCount
+			metric.FailureCount24h = c.ErrorCount
+		}
+
 		result.Models = append(result.Models, metric)
 	}
 
@@ -371,6 +443,8 @@ func GetPerfMetricsDetail(modelName string, windowHours int) (*PerfMetricsDetail
 		key := row.GroupName + "|" + itoa64(row.Bucket)
 		if frtCountByKey[key] > 0 {
 			point.AvgTtftMs = frtSumByKey[key] / float64(frtCountByKey[key])
+		} else if point.AvgLatencyMs > 0 {
+			point.AvgTtftMs = point.AvgLatencyMs
 		}
 		seriesByGroup[row.GroupName] = append(seriesByGroup[row.GroupName], point)
 	}
@@ -406,27 +480,7 @@ func GetPerfMetricsDetail(modelName string, windowHours int) (*PerfMetricsDetail
 		return result.Groups[i].Group < result.Groups[j].Group
 	})
 
-	recent := make([]perfMetricsRecentRow, 0)
-	_ = LOG_DB.Table("logs").
-		Select("type, content").
-		Where("model_name = ?", modelName).
-		Where("type IN ?", []int{LogTypeConsume, LogTypeError}).
-		Order("id DESC").
-		Limit(perfMetricsFailScanRows).
-		Scan(&recent).Error
-
-	var consecutiveFailures int64
-	var lastErrorType string
-	for _, row := range recent {
-		if row.Type == LogTypeError {
-			consecutiveFailures++
-			if lastErrorType == "" {
-				lastErrorType = summarizePerfError(row.Content)
-			}
-			continue
-		}
-		break
-	}
+	consecutiveFailures, lastErrorType := queryRecentStats(modelName)
 
 	result.Activity = PerfMetricsActivity{
 		OneHour:             queryPerfWindow(modelName, now-3600),
