@@ -25,6 +25,7 @@ import {
 } from '../../services/siteBackground';
 import SiteBackgroundGlassFilter from './SiteBackgroundGlassFilter';
 import SiteBackgroundGlassCanvas from './SiteBackgroundGlassCanvas';
+import SiteBackgroundStars from './SiteBackgroundStars';
 
 const SiteBackground = ({ config, onAssetChange }) => {
   const normalizedConfig = useMemo(
@@ -140,6 +141,7 @@ const SiteBackground = ({ config, onAssetChange }) => {
               style={{ objectFit: normalizedConfig.fit }}
             />
           )}
+          {normalizedConfig.stars_enabled && <SiteBackgroundStars />}
           <div
             className='site-background-overlay'
             style={{

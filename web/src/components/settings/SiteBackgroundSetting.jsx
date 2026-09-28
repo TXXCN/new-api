@@ -94,6 +94,7 @@ const parseDraftConfig = (value) => {
     overlay_opacity: Number.isFinite(opacity)
       ? Math.min(80, Math.max(0, Math.round(opacity)))
       : DEFAULT_SITE_BACKGROUND_CONFIG.overlay_opacity,
+    stars_enabled: parsed.stars_enabled === true,
     glass_enabled: parsed.glass_enabled === true,
     glass_opacity: Number.isFinite(glassOpacity)
       ? Math.min(100, Math.max(0, Math.round(glassOpacity)))
@@ -130,6 +131,7 @@ const cleanDraftConfig = (draft) => ({
   enabled: draft.enabled === true,
   fit: draft.fit,
   overlay_opacity: Number(draft.overlay_opacity),
+  stars_enabled: draft.stars_enabled === true,
   glass_enabled: draft.glass_enabled === true,
   glass_opacity: Number(draft.glass_opacity),
   glass_refraction: Number(draft.glass_refraction),
@@ -420,6 +422,17 @@ const SiteBackgroundSetting = ({ value, onSaved }) => {
             }
             style={{ width: '100%' }}
           />
+        </div>
+        <div className='site-background-setting-control'>
+          <Typography.Text strong>{t('启用动态星空')}</Typography.Text>
+          <Switch
+            checked={draft.stars_enabled}
+            aria-label={t('启用动态星空')}
+            onChange={(starsEnabled) => updateDraft({ stars_enabled: starsEnabled })}
+          />
+          <Typography.Text type='tertiary'>
+            {t('显示 500 颗缓慢移动并闪烁的星星，效果参考 Cosmic Broth。')}
+          </Typography.Text>
         </div>
         <div className='site-background-setting-control'>
           <Typography.Text strong>{t('启用液态玻璃')}</Typography.Text>
